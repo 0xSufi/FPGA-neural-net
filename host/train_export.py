@@ -108,20 +108,46 @@ def render_digits(n_per_class=1000):
     print(f"[data] rendered {len(y)} printed-digit samples ({len(fonts)} fonts, 2 styles)")
     return X, y
 
+def render_twodigit(n_numbers=3000):
+    """Per-digit tiles extracted from TWO-DIGIT renders via the same segmentation
+    the host uses (send_number.ink_to_tiles) -> teaches the net how digits look
+    when cropped out of an adjacent pair (kerning, tighter/offset crops)."""
+    import send_number as sn
+    fonts = [p for p in sorted(glob.glob("/usr/share/fonts/truetype/**/*.ttf", recursive=True))
+             if any(k in p.lower() for k in ("sans","mono","serif")) and "math" not in p.lower()][:8] or [None]
+    rng = np.random.default_rng(2)
+    X, y, kept = [], [], 0
+    for _ in range(n_numbers):
+        num  = int(rng.integers(10, 100))
+        fp   = fonts[int(rng.integers(len(fonts)))]
+        size = int(rng.integers(40, 90)); gap = int(rng.integers(6, 24))
+        img  = sn.render_number_image(num, size=size, gap=gap, font_path=fp, jitter=2, rng=rng)
+        ink  = (np.asarray(img, np.float32)/255.0 < float(rng.uniform(0.4, 0.6))).astype(np.uint8)
+        tiles = sn.ink_to_tiles(ink)
+        if len(tiles) != 2: continue                 # keep only cleanly-split pairs
+        kept += 1
+        for t, lab in zip(tiles, [num//10, num%10]):
+            X.append(t.astype(np.float32)); y.append(lab)
+    X = torch.tensor(np.stack(X)); y = torch.tensor(y)
+    print(f"[data] two-digit-segmented: {len(y)} tiles from {kept} clean pairs")
+    return X, y
+
+def split(X, y, frac=0.9):
+    p = torch.randperm(len(y)); X, y = X[p], y[p]; c = int(frac*len(y))
+    return X[:c], y[:c], X[c:], y[c:]
+
 (mn_tr, mn_te) = load_mnist()
-rd_X, rd_y = render_digits()
-# split rendered into train/test
-perm = torch.randperm(len(rd_y)); rd_X, rd_y = rd_X[perm], rd_y[perm]
-cut = int(0.9*len(rd_y))
-rd_trX, rd_trY, rd_teX, rd_teY = rd_X[:cut], rd_y[:cut], rd_X[cut:], rd_y[cut:]
+rd_trX, rd_trY, rd_teX, rd_teY = split(*render_digits())
+td_trX, td_trY, td_teX, td_teY = split(*render_twodigit())
 
 if mn_tr is not None:
-    trX = torch.cat([mn_tr[0], rd_trX]); trY = torch.cat([mn_tr[1], rd_trY])
-    teX, teY = mn_te[0], mn_te[1]                 # evaluate on MNIST test
-    teX2, teY2 = rd_teX, rd_teY                    # and on printed test
+    trX = torch.cat([mn_tr[0], rd_trX, td_trX]); trY = torch.cat([mn_tr[1], rd_trY, td_trY])
+    teX, teY = mn_te[0], mn_te[1]                 # MNIST test
 else:
-    trX, trY, teX, teY = rd_trX, rd_trY, rd_teX, rd_teY
-    teX2, teY2 = rd_teX, rd_teY
+    trX = torch.cat([rd_trX, td_trX]); trY = torch.cat([rd_trY, td_trY])
+    teX, teY = rd_teX, rd_teY
+teX2, teY2 = rd_teX, rd_teY                        # single printed test
+teX3, teY3 = td_teX, td_teY                        # two-digit-segmented test
 
 # --------------------------------------------------------------------------
 # Model
@@ -149,7 +175,8 @@ for ep in range(8):
     with torch.no_grad():
         a1 = (net(teX.to(DEV)).argmax(1).cpu() == teY).float().mean().item()
         a2 = (net(teX2.to(DEV)).argmax(1).cpu() == teY2).float().mean().item()
-    print(f"[train] epoch {ep}  loss {loss.item():.3f}  acc(mnist/printed) {a1:.3f}/{a2:.3f}")
+        a3 = (net(teX3.to(DEV)).argmax(1).cpu() == teY3).float().mean().item()
+    print(f"[train] epoch {ep}  loss {loss.item():.3f}  acc(mnist/printed/2digit) {a1:.3f}/{a2:.3f}/{a3:.3f}")
 
 # --------------------------------------------------------------------------
 # Quantize to integers
@@ -191,7 +218,8 @@ def acc_on(X, y):
     Xi = X.numpy().astype(np.int64)
     pred = np.array([infer_int(Xi[i])[0] for i in range(len(y))])
     return (pred == y.numpy()).mean()
-print(f"[quant] INT accuracy  mnist={acc_on(teX,teY):.3f}  printed={acc_on(teX2,teY2):.3f}")
+print(f"[quant] INT accuracy  mnist={acc_on(teX,teY):.3f}  printed={acc_on(teX2,teY2):.3f}  "
+      f"2digit={acc_on(teX3,teY3):.3f}")
 
 # --------------------------------------------------------------------------
 # Export ROM images

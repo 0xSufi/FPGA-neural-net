@@ -58,13 +58,10 @@ def tile_from_box(mask):
     out.paste(crop, ((28-w)//2, (28-h)//2))
     return (np.asarray(out, np.float32)/255.0 > 0.5).astype(np.uint8).reshape(-1)
 
-def image_to_tiles(path):
-    """Segment a black-on-white number image into up to 2 digit tiles."""
-    g = np.asarray(Image.open(path).convert("L"), np.float32)/255.0
-    ink = (g < 0.5).astype(np.uint8)                 # dark ink -> 1
+def ink_to_tiles(ink):
+    """Segment a binary ink mask (1=ink) into up to 2 left-to-right digit tiles."""
     cols = ink.sum(axis=0) > 0
-    # group contiguous ink columns into digit blobs
-    blobs, s = [], None
+    blobs, s = [], None                              # contiguous ink-column runs
     for i, c in enumerate(cols):
         if c and s is None: s = i
         elif not c and s is not None: blobs.append((s, i)); s = None
@@ -74,6 +71,38 @@ def image_to_tiles(path):
         blobs = sorted(blobs, key=lambda b: b[1]-b[0])[-2:]
     blobs = sorted(blobs, key=lambda b: b[0])        # left-to-right
     return [tile_from_box(ink[:, x0:x1]) for x0, x1 in blobs] or [np.zeros(28*28, np.uint8)]
+
+def image_to_tiles(path):
+    """Segment a black-on-white number image (file) into up to 2 digit tiles."""
+    g = np.asarray(Image.open(path).convert("L"), np.float32)/255.0
+    return ink_to_tiles((g < 0.5).astype(np.uint8))  # dark ink -> 1
+
+def render_number_image(n, size=64, gap=None, font_path=None, jitter=0, rng=None):
+    """Render a number 0..99 as a black-on-white image (two digits drawn with a
+    clear gap so column-projection segmentation splits them cleanly).
+    Returns a PIL 'L' image (white bg, black digits)."""
+    r = rng or np.random.default_rng()
+    digits = [n // 10, n % 10] if n >= 10 else [n]
+    f = ImageFont.truetype(font_path, size) if font_path else _font(size)
+    if gap is None: gap = max(6, size // 4)
+    # measure each glyph
+    tmp = ImageDraw.Draw(Image.new("L", (4, 4)))
+    boxes = []
+    for d in digits:
+        try: bb = tmp.textbbox((0, 0), str(d), font=f)
+        except Exception: bb = (0, 0, size//2, size)
+        boxes.append((bb, bb[2]-bb[0], bb[3]-bb[1]))
+    tw = sum(b[1] for b in boxes) + gap*(len(digits)-1)
+    th = max(b[2] for b in boxes)
+    pad = size
+    W, H = tw + 2*pad, th + 2*pad
+    img = Image.new("L", (W, H), 255); dr = ImageDraw.Draw(img)
+    x = pad
+    for (bb, w, h), d in zip(boxes, digits):
+        dy = int(r.integers(-jitter, jitter+1)) if jitter else 0
+        dr.text((x - bb[0], pad - bb[1] + dy), str(d), fill=0, font=f)
+        x += w + gap
+    return img
 
 # --------------------------------------------------------------------------
 def preview(tiles):
