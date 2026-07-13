@@ -27,7 +27,9 @@ module top_ocr #(
     input  wire       uart_rx,         // B3  from BL616
     output wire       uart_tx,         // C3  to BL616
     output wire [6:0] seg,             // PMOD_DTx2 segments (active low)
-    output wire       sel              // PMOD_DTx2 digit select
+    output wire       sel,             // PMOD_DTx2 digit select
+    output wire [7:0] o_ledb,          // PMOD_LEDx8 on slot B (active low)
+    output wire [7:0] o_ledc           // PMOD_LEDx8 on slot C (active low)
 );
     wire rst_n = ~rst;
 
@@ -143,4 +145,19 @@ module top_ocr #(
         .blank_tens(blank_tens), .blank_ones(blank_ones),
         .seg(seg), .sel(sel)
     );
+
+    // ---- activity indicator: sweep 16 LEDs while a number is being processed --
+    // "busy" is held for ~1s after any UART byte or non-idle control state, so a
+    // full sweep is visible each time a number is sent.
+    wire activity = rx_valid | (cstate != C_IDLE);
+    reg [25:0] busy_tmr;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)          busy_tmr <= 0;
+        else if (activity)   busy_tmr <= 26'd50_000_000;   // ~1s @50MHz
+        else if (busy_tmr!=0)busy_tmr <= busy_tmr - 1'b1;
+    end
+    wire [15:0] lit;
+    led_sweep u_leds (.clk(clk), .rst_n(rst_n), .busy(busy_tmr != 0), .lit(lit));
+    assign o_ledb = ~lit[7:0];         // active-low PMOD_LEDx8
+    assign o_ledc = ~lit[15:8];
 endmodule

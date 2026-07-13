@@ -19,7 +19,7 @@ if [ "$1" = "diag" ]; then
 else
     TOP=top_ocr;  CST=constraints/top_ocr.cst
     SRC="rtl/uart_rx.v rtl/uart_tx.v rtl/dense_layer.v rtl/ocr_mlp.v \
-         rtl/img_mem.v rtl/frame_rx.v rtl/seg7_2digit.v rtl/top_ocr.v"
+         rtl/img_mem.v rtl/frame_rx.v rtl/seg7_2digit.v rtl/led_sweep.v rtl/top_ocr.v"
 fi
 FS=build/$TOP.fs
 
