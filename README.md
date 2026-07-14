@@ -22,6 +22,11 @@ classifies each and combines them (leading-zero blanked for single-digit numbers
 The net is trained on both direct digit renders **and** per-digit tiles cut from
 two-digit renders with the same segmentation, so real two-digit images work well.
 
+## Screenshots
+
+<img width="478" height="500" alt="ocr1" src="https://github.com/user-attachments/assets/b6be905d-bfb5-46eb-8b9e-40312d25d9b4" />
+<img width="800" height="352" alt="ocr2" src="https://github.com/user-attachments/assets/74df5035-4638-46e4-b136-1aa04a1349b1" />
+
 ## Status — WORKING ON HARDWARE
 
 | Check | Result |
